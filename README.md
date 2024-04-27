@@ -16,12 +16,12 @@ from mh_moe.main import MHMoE
 
 # Define model parameters
 dim = 512
-num_heads = 8
+heads = 8
 num_experts = 4
 num_layers = 3
 
 # Create MHMoE model instance
-model = MHMoE(dim, num_heads, num_experts, num_layers)
+model = MHMoE(dim, heads, num_experts, num_layers)
 
 # Generate dummy input
 batch_size = 10

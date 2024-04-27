@@ -145,10 +145,35 @@ class TopkRouter(nn.Module):
 
 
 class MHMoE(nn.Module):
-    def __init__(self, dim, num_heads, num_experts, num_layers):
+    """
+    Multi-Head Mixture of Experts (MHMoE) module.
+
+    Args:
+        dim (int): The input dimension.
+        heads (int): The number of attention heads.
+        num_experts (int): The number of experts.
+        num_layers (int): The number of layers.
+
+    Attributes:
+        dim (int): The input dimension.
+        heads (int): The number of attention heads.
+        num_experts (int): The number of experts.
+        num_layers (int): The number of layers.
+        multi_head_layers (nn.ModuleList): List of multi-head layers.
+        merge_layers (nn.ModuleList): List of merge layers.
+
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        heads: int,
+        num_experts: int = 6,
+        num_layers: int = 3,
+    ):
         super(MHMoE, self).__init__()
         self.dim = dim
-        self.num_heads = num_heads
+        self.heads = heads
         self.num_experts = num_experts
         self.num_layers = num_layers
 
@@ -170,102 +195,67 @@ class MHMoE(nn.Module):
             nn.init.constant_(self.merge_layers[i].bias, 0)
 
     def forward(self, x, mask):
+        """
+        Forward pass of the MHMoE module.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+            mask (torch.Tensor): The mask tensor.
+
+        Returns:
+            torch.Tensor: The output tensor.
+
+        """
         # Loop through each layer
         for i in range(self.num_layers):
             x = self.process_layer(x, mask, i)
         return x
 
-    # def process_layer(self, x, mask, layer_index):
-    #     batch_size, length, _ = x.size()
-
-    #     # Processed by multi-head layer
-    #     x = self.multi_head_layers[layer_index](x)
-    #     print(x.shape)
-
-    #     # Using einops to split and rearrange sub-tokens in parallel
-    #     x = rearrange(
-    #         x,
-    #         "b l (h d) -> (b h) l d",
-    #         h=self.num_heads,
-    #         d=self.dim // self.num_heads,
-    #     )
-    #     b, s, d = x.shape
-    #     print(x.shape)
-
-    #     # Example routing logic (placeholder)
-    #     # x, i = NoisyTopkRouter(self.dim, self.num_experts, 2)(x)  # Replace with actual routing logic
-    #     x, i = TopkRouter(d, self.num_experts, 2)(x)
-    #     print(x.shape)
-
-    #     # Sparse Moe
-    #     # x, e = NormalSparseMoE(
-    #     #     dim,
-    #     #     num_experts=self.num_experts,
-    #     #     # experts=
-    #     # )
-
-    #     # Using einops to merge back to the original token form
-    #     x = rearrange(
-    #         x,
-    #         "(b h) l d -> b l (h d)",
-    #         b=batch_size,
-    #         h=self.num_heads,
-    #         d=self.dim // self.num_heads,
-    #     )
-
-    #     # Output processed by merge layer
-    #     x = self.merge_layers[layer_index](x)
-
-    #     return x
-
     def process_layer(self, x, mask, layer_index):
+        """
+        Process a single layer of the MHMoE module.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+            mask (torch.Tensor): The mask tensor.
+            layer_index (int): The index of the layer.
+
+        Returns:
+            torch.Tensor: The output tensor.
+
+        """
         batch_size, length, _ = x.size()
 
         # Processed by multi-head layer
         x = self.multi_head_layers[layer_index](x)
 
         # Correcting the reshaping step
-        # We need to ensure x is reshaped to (batch_size, num_heads, length, dim/num_heads)
+        # We need to ensure x is reshaped to (batch_size, heads, length, dim/heads)
         x = x.view(
             batch_size,
             length,
-            self.num_heads,
-            self.dim // self.num_heads,
+            self.heads,
+            self.dim // self.heads,
         )
         x = x.permute(
             0, 2, 1, 3
-        ).contiguous()  # this rearranges to (batch_size, num_heads, length, dim/num_heads)
+        ).contiguous()  # this rearranges to (batch_size, heads, length, dim/heads)
         x = x.view(
-            batch_size * self.num_heads,
+            batch_size * self.heads,
             length,
-            self.dim // self.num_heads,
+            self.dim // self.heads,
         )
         b, s, d = x.shape
         print(x.shape)
 
-        # Simulated expert processing (needs actual implementation)
-        # For now, assume identity transformation
-        # x = x  # Replace with actual routing and processing logic
-        # x, i = NoisyTopkRouter(d, self.num_experts, 2)(x)
-        # print(x.shape)
-        # x, e = NormalSparseMoE(
-        #     self.dim,
-        #     self.num_experts,
-        # )
-        # x = TopkRouter(
-        #     d,
-        #     self.num_experts,
-        #     top_k=4,
-        # )(x)
-        # x = reduce("b h l d -> b l (h d)", x, "mean")
         x = SparseMoE(d, self.num_experts, 2)(x)
 
         # Reshape back to original form after processing
         x = x.view(
             batch_size,
-            self.num_heads,
+            self.heads,
             length,
-            self.dim // self.num_heads,
+            self.dim // self.heads,
         )
         x = x.permute(0, 2, 1, 3).contiguous()
         x = x.view(batch_size, length, self.dim)
